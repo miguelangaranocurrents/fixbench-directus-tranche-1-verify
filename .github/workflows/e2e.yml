@@ -1,0 +1,89 @@
+name: e2e
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  DB_CLIENT: sqlite3
+  DB_FILENAME: ${{ github.workspace }}/e2e-data/database.db
+  STORAGE_LOCAL_ROOT: ${{ github.workspace }}/e2e-data/uploads
+  EXTENSIONS_PATH: ${{ github.workspace }}/e2e-data/extensions
+  KEY: e2e-key
+  SECRET: e2e-secret-that-is-long-enough-for-hs256
+  ADMIN_EMAIL: admin@example.com
+  ADMIN_PASSWORD: d1r3ctu5
+  ADMIN_TOKEN: e2e-admin-token
+  PROJECT_OWNER: admin@example.com
+  PUBLIC_URL: http://localhost:8055
+  TELEMETRY: 'false'
+  RATE_LIMITER_ENABLED: 'false'
+  LOG_LEVEL: info
+
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build
+        env:
+          npm_config_workspace_concurrency: 2
+          NODE_OPTIONS: --max_old_space_size=6144
+        run: pnpm run build
+
+      - name: Start Directus
+        run: |
+          mkdir -p e2e-data/uploads e2e-data/extensions
+          node directus/cli.js bootstrap
+          nohup node directus/cli.js start > directus.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8055/server/ping && break
+            sleep 2
+          done
+          curl -sf http://localhost:8055/server/ping
+
+      - name: Install Playwright
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run e2e tests
+        working-directory: e2e
+        env:
+          CI: 'true'
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+            e2e/test-results.json
+            directus.log
+          retention-days: 30
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: e2e/test-results.json
+          retention-days: 30
