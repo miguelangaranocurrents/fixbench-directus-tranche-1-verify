@@ -27,11 +27,23 @@ test.describe('Markdown editor', () => {
 
 		const edit = page.getByRole('button', { name: 'Edit', exact: true });
 		const preview = page.getByRole('button', { name: 'Preview', exact: true });
-		const background = (button: typeof edit) => button.evaluate((el) => getComputedStyle(el).backgroundColor);
+		const settledBackground = async (button: typeof edit) => {
+			await expect.poll(() => button.evaluate((el) => el.getAnimations({ subtree: true }).length)).toBe(0);
+			return button.evaluate((el) => getComputedStyle(el).backgroundColor);
+		};
+
+		await page.locator('.CodeMirror').click();
+		await page.keyboard.type('# Release notes');
+		await page.mouse.move(0, 0);
+		const selectedBefore = await settledBackground(edit);
 
 		await preview.click();
 		await page.mouse.move(0, 0);
+		await expect(page.getByRole('heading', { name: 'Release notes' })).toBeVisible();
 
-		await expect.poll(async () => (await background(preview)) !== (await background(edit))).toBe(true);
+		const previewAfter = await settledBackground(preview);
+		const editAfter = await settledBackground(edit);
+		expect(previewAfter).not.toBe(editAfter);
+		expect(previewAfter).toBe(selectedBefore);
 	});
 });
